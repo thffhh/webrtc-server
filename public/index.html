@@ -1,55 +1,95 @@
 <!DOCTYPE html>
 <html>
+<head>
+  <title>WebRTC Live Room</title>
+  <style>
+    video {
+      width: 45%;
+      margin: 10px;
+      border: 2px solid black;
+    }
+  </style>
+</head>
 <body>
 
-<h2>WebRTC Call</h2>
+<h2>🔥 Live WebRTC Call</h2>
 
-<video id="local" autoplay playsinline></video>
-<video id="remote" autoplay playsinline></video>
+<video id="localVideo" autoplay playsinline></video>
+<video id="remoteVideo" autoplay playsinline></video>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const socket = io("https://socket-server-wiop.onrender.com");
+const socket = io("https://webrtc-server-rp27.onrender.com");
 
-const room = "test";
+const room = "test-room";
 
-const local = document.getElementById("local");
-const remote = document.getElementById("remote");
+const localVideo = document.getElementById("localVideo");
+const remoteVideo = document.getElementById("remoteVideo");
 
-const pc = new RTCPeerConnection({
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-});
-
-socket.emit("join-room", room);
-
-navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-.then(stream => {
-  local.srcObject = stream;
-  stream.getTracks().forEach(t => pc.addTrack(t, stream));
-});
-
-pc.ontrack = (e) => remote.srcObject = e.streams[0];
-
-pc.onicecandidate = (e) => {
-  if (e.candidate)
-    socket.emit("ice-candidate", { candidate: e.candidate, room });
+const config = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" }
+  ]
 };
 
+const peer = new RTCPeerConnection(config);
+
+// join room
+socket.emit("join-room", room);
+
+// get camera + mic
+navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+.then(stream => {
+  localVideo.srcObject = stream;
+
+  stream.getTracks().forEach(track => {
+    peer.addTrack(track, stream);
+  });
+});
+
+// receive remote stream
+peer.ontrack = (event) => {
+  remoteVideo.srcObject = event.streams[0];
+};
+
+// ICE candidate send
+peer.onicecandidate = (event) => {
+  if (event.candidate) {
+    socket.emit("ice-candidate", {
+      candidate: event.candidate,
+      room
+    });
+  }
+};
+
+// user joined → create offer
 socket.on("user-joined", async () => {
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
+
   socket.emit("offer", { offer, room });
 });
 
+// receive offer
 socket.on("offer", async (data) => {
-  await pc.setRemoteDescription(data.offer);
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
+  await peer.setRemoteDescription(data.offer);
+
+  const answer = await peer.createAnswer();
+  await peer.setLocalDescription(answer);
+
   socket.emit("answer", { answer, room });
 });
 
+// receive answer
 socket.on("answer", async (data) => {
-  await pc.setRemoteDescription(data.answer);
+  await peer.setRemoteDescription(data.answer);
+});
+
+// ICE receive
+socket.on("ice-candidate", async (data) => {
+  try {
+    await peer.addIceCandidate(data.candidate);
+  } catch (e) {}
 });
 </script>
 
